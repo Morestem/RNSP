@@ -1,3 +1,14 @@
+#!/usr/bin/env python3
+"""
+Train only the WORKING models: ULEEN and ClusWiSaRD
+(torchwnn and BTHOWeN have a fundamental bug causing single-class predictions)
+
+This script:
+- Tests multiple hyperparameter configurations for each model
+- Trains on 7 individual datasets + 1 combined dataset
+- Saves comprehensive results with metrics and execution times
+"""
+
 import pandas as pd
 import numpy as np
 import torch
@@ -8,56 +19,151 @@ import sys
 import os
 import time
 import json
-import pickle
 from datetime import datetime
-import glob
+from itertools import product
 
-# Add paths to import models
-sys.path.append(os.path.join(os.path.dirname(__file__), 'BTHOWeN', 'software_model'))
+# Add paths
 sys.path.append(os.path.join(os.path.dirname(__file__), 'ULEEN', 'software_model'))
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'torchwnn'))
-
-try:
-    from torchwnn.classifiers import Wisard as TorchWisard
-    from torchwnn.classifiers import BloomWisard as TorchBloomWisard
-except ImportError as e:
-    print(f"Error importing torchwnn: {e}")
-
-try:
-    from BTHOWeN.software_model.wisard import WiSARD as BTHOWenWisard
-except ImportError as e:
-    print(f"Error importing BTHOWeN: {e}")
+sys.path.append(os.path.join(os.path.dirname(__file__), 'torchwnn'))
+sys.path.append(os.path.join(os.path.dirname(__file__), 'BTHOWeN', 'software_model'))
 
 try:
     from ULEEN.software_model.model import BackpropWiSARD as UleenWisard
 except ImportError as e:
     print(f"Error importing ULEEN: {e}")
+    sys.exit(1)
 
 try:
     import wisardpkg as wp
 except ImportError:
-    print("wisardpkg is not installed or available.")
+    print("wisardpkg not available - ClusWiSaRD will be skipped")
     wp = None
+
+try:
+    from torchwnn.classifiers import Wisard as TorchWNNWisard
+    from torchwnn.classifiers import BloomWisard as BloomWisard
+    print("✓ torchwnn imported successfully")
+except ImportError as e:
+    print(f"torchwnn not available: {e}")
+    TorchWNNWisard = None
+    BloomWisard = None
+
+try:
+    from wisard import WiSARD as BTHOWeNWisard
+    print("✓ BTHOWeN imported successfully")
+except ImportError as e:
+    print(f"BTHOWeN not available: {e}")
+    BTHOWeNWisard = None
 
 # Create output directory
 os.makedirs('_results', exist_ok=True)
+os.makedirs('_results/binarized_datasets', exist_ok=True)
 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
-def log_and_print(message):
-    """Log message to both console and file"""
-    print(message)
+# ========== BINARIZATION CONFIGURATION ==========
+TEXT_STATE_MAPPING = {'off': 0, 'on': 1, 'closed': 0, 'open': 1, 'low': 0, 'high': 1}
+CONTROL_COLS = {'label', 'type', 'date', 'time', 'device_origin'}
+BITS_RESOLUTION = 16  # Bits for numerical features
+
+
+# ========== BINARIZATION FUNCTIONS ==========
+def encode_circular_thermometer(values, max_val, num_bits=8):
+    """Encodes circular continuous values into a circular thermometer (vectorized)."""
+    values = np.nan_to_num(np.asarray(values, dtype=np.float64), nan=0.0)
+    start_bits = ((values / max_val) * num_bits).astype(np.int32) % num_bits
+    
+    thermometer = np.zeros((len(values), num_bits), dtype=np.uint8)
+    window = num_bits // 2 
+    
+    for w in range(window):
+        bit_pos = (start_bits + w) % num_bits
+        thermometer[np.arange(len(values)), bit_pos] = 1
+        
+    return thermometer
+
+
+def binarize_dataframe_densely(df, resolution, cat_resolution=8):
+    """Applies heterogeneous thermometers and presence flags to dataframe."""
+    df_clean = df.copy()
+    final_bin_parts = []
+    
+    # 1. Circular Temporal Extraction
+    if 'time' in df_clean.columns:
+        presence_time = df_clean['time'].notna().astype(np.uint8).values.reshape(-1, 1)
+        hours = pd.to_datetime(df_clean['time'], errors='coerce', format='mixed').dt.hour.fillna(0).values
+        therm_hours = encode_circular_thermometer(hours, max_val=24, num_bits=12)
+        final_bin_parts.append(np.hstack([presence_time, therm_hours]))
+        
+    if 'date' in df_clean.columns:
+        presence_date = df_clean['date'].notna().astype(np.uint8).values.reshape(-1, 1)
+        dow = pd.to_datetime(df_clean['date'], errors='coerce', format='mixed').dt.dayofweek.fillna(0).values
+        therm_dow = encode_circular_thermometer(dow, max_val=7, num_bits=8)
+        final_bin_parts.append(np.hstack([presence_date, therm_dow]))
+
+    # 2. Binary Textual State Standardization
+    for col in df_clean.columns:
+        if col not in CONTROL_COLS and df_clean[col].dtype == 'object':
+            unique_vals = df_clean[col].dropna().astype(str).str.strip().str.lower().unique()
+            if any(val in TEXT_STATE_MAPPING for val in unique_vals):
+                df_clean[col] = df_clean[col].astype(str).str.strip().str.lower().map(TEXT_STATE_MAPPING)
+
+    # 3. Structural Attribute Processing
+    features_to_process = [c for c in df_clean.columns if c not in CONTROL_COLS]
+    
+    for col in features_to_process:
+        presence_flag = df_clean[col].notna().astype(np.uint8).values.reshape(-1, 1)
+        
+        # Categorical columns
+        if df_clean[col].dtype == 'object':
+            filled_cat = df_clean[col].fillna('missing').astype('category')
+            cats = filled_cat.cat.codes.values
+            norm_cats = cats / cats.max() if cats.max() > 0 else np.zeros_like(cats)
+            
+            thermometer_cat = np.zeros((len(norm_cats), cat_resolution), dtype=np.uint8)
+            for i in range(cat_resolution):
+                threshold = (i + 1) / (cat_resolution + 1)
+                thermometer_cat[norm_cats >= threshold, i] = 1
+            final_bin_parts.append(np.hstack([presence_flag, thermometer_cat]))
+            continue
+            
+        # Numeric columns
+        val = pd.to_numeric(df_clean[col], errors='coerce').fillna(0).values
+        unique_vals = np.unique(val)
+        
+        # Binary case (only 0 and 1)
+        if np.all(np.isin(unique_vals, [0, 1])):
+            bi_part = val.astype(np.uint8).reshape(-1, 1)
+            final_bin_parts.append(np.hstack([presence_flag, bi_part]))
+            continue
+            
+        # Log scale for high-range values
+        if val.max() > 1000 or (val.max() / (val.min() + 1e-5) > 500):
+            val = np.log1p(val)
+            
+        # Normalize
+        min_v, max_v = val.min(), val.max()
+        norm = np.zeros_like(val) if max_v - min_v == 0 else (val - min_v) / (max_v - min_v)
+        
+        # Thermometer encoding
+        thermometer_num = np.zeros((len(norm), resolution), dtype=np.uint8)
+        for i in range(resolution):
+            threshold = (i + 1) / (resolution + 1)
+            thermometer_num[norm >= threshold, i] = 1
+            
+        final_bin_parts.append(np.hstack([presence_flag, thermometer_num]))
+        
+    return np.hstack(final_bin_parts) if final_bin_parts else np.empty((len(df), 0), dtype=np.uint8)
+
 
 def load_and_preprocess_dataset(csv_path, max_samples=None):
-    """Load a dataset and preprocess it with balanced class distribution"""
-    print(f"\n📂 Loading {os.path.basename(csv_path)}...")
+    """Load dataset and preprocess with dense binarization."""
+    print(f"📂 Loading {os.path.basename(csv_path)}...")
     df = pd.read_csv(csv_path, low_memory=False)
+    df.columns = df.columns.str.strip()
     
     print(f"   Raw samples: {len(df)}")
     
-    df = df.dropna()
-    print(f"   After dropping NaN: {len(df)}")
-    
-    # Find label column
+    # Keep rows as long as label is present; preserve feature-level NaNs for presence flags
     label_col = None
     for col in df.columns:
         if col.lower() == 'label':
@@ -67,6 +173,9 @@ def load_and_preprocess_dataset(csv_path, max_samples=None):
     if label_col is None:
         print(f"   ⚠️  No 'label' column found!")
         return None, None
+    
+    df = df[df[label_col].notna()].copy()
+    print(f"   Samples with label: {len(df)}")
     
     # Extract labels
     y = df[label_col].values
@@ -80,112 +189,40 @@ def load_and_preprocess_dataset(csv_path, max_samples=None):
     label_map = {label: idx for idx, label in enumerate(unique_labels)}
     y_numeric = np.array([label_map[label] for label in y])
     
-    # Select feature columns (skip non-feature columns)
-    skip_cols = {label_col, 'date', 'time', 'type', 'Type'}
-    feature_cols = [col for col in df.columns if col not in skip_cols]
+    print(f"   Classes: {dict(zip(unique_labels, np.unique(y_numeric, return_counts=True)[1]))}")
     
-    print(f"   Feature columns: {feature_cols}")
+    # Binarize with dense encoding
+    X_binarized = binarize_dataframe_densely(df, BITS_RESOLUTION)
     
-    # Convert all features to useful binary features (0 or 1)
-    X_processed = []
-    for col in feature_cols:
-        col_data = df[col].values
-        
-        # Convert to string first to handle mixed types
-        col_str = np.array([str(x).strip() for x in col_data])
-        
-        # Try to convert to numeric
-        try:
-            col_numeric = pd.to_numeric(col_str, errors='coerce')
-            valid_mask = ~np.isnan(col_numeric)
-            valid_vals = col_numeric[valid_mask]
-            
-            # If enough numeric values
-            if valid_mask.sum() > len(col_numeric) * 0.5 and len(np.unique(valid_vals)) > 1:
-                # Use min/max normalization then quartile thresholding
-                col_min, col_max = np.nanmin(col_numeric), np.nanmax(col_numeric)
-                
-                # If range is zero, make arbitrary binary split
-                if col_max == col_min:
-                    f1 = np.zeros_like(col_numeric, dtype=float)
-                    f1[~np.isnan(col_numeric)] = 1.0
-                    X_processed.append(np.nan_to_num(f1, nan=0.0))
-                else:
-                    # Normalize to [0, 1]
-                    col_norm = (col_numeric - col_min) / (col_max - col_min)
-                    
-                    # Create 3 binary features using percentile thresholds
-                    q1 = np.nanpercentile(col_norm, 33)
-                    q2 = np.nanpercentile(col_norm, 67)
-                    
-                    f1 = (col_norm > q1).astype(float)
-                    f2 = (col_norm > q2).astype(float)
-                    f3 = (col_norm > 0.5).astype(float)
-                    
-                    X_processed.append(np.nan_to_num(f1, nan=0.0))
-                    X_processed.append(np.nan_to_num(f2, nan=0.0))
-                    X_processed.append(np.nan_to_num(f3, nan=0.0))
-                continue
-        except:
-            pass
-        
-        # Fall back to categorical: create multiple binary features
-        unique_vals = np.unique(col_str)
-        if len(unique_vals) > 1:
-            # Use top 2 unique values as separators for 2 binary features
-            for i, uv in enumerate(unique_vals[:2]):
-                binary_col = (col_str == uv).astype(float)
-                X_processed.append(binary_col)
-        else:
-            # Single unique value - add dummy feature
-            X_processed.append(np.zeros(len(col_str)))
-    
-    if len(X_processed) == 0:
-        print(f"   ⚠️  No valid features found!")
+    if X_binarized.shape[1] == 0:
+        print(f"   ⚠️  No valid features after binarization!")
         return None, None
     
-    # Normalize to max 12 features per dataset
-    if len(X_processed) > 12:
-        X_processed = X_processed[:12]
+    print(f"   Binarized features: {X_binarized.shape}")
     
-    X = np.column_stack(X_processed).astype(float)
-    print(f"   Processed features: {X.shape} (reduced from {len(feature_cols)})")
-    
-    # Remove rows with NaN
-    valid_idx = ~np.isnan(X).any(axis=1)
-    X = X[valid_idx]
-    y_numeric = y_numeric[valid_idx]
-    
-    print(f"   After removing NaN: {len(X)}")
-    
-    y = y_numeric
-    
-    # Balance dataset by taking equal samples from each class
-    unique_classes, class_counts = np.unique(y, return_counts=True)
-    print(f"   Original class distribution: {dict(zip(unique_classes, class_counts))}")
+    unique_classes, class_counts = np.unique(y_numeric, return_counts=True)
+    print(f"   Class distribution: {dict(zip(unique_classes, class_counts))}")
     
     if len(class_counts) == 0:
         print(f"   ⚠️  No valid classes found!")
         return None, None
     
-    min_class_count = class_counts.min()
+    # If max_samples is provided, apply balancing/subsampling; otherwise keep full dataset
+    if max_samples is None:
+        return X_binarized, y_numeric
     
-    # If max_samples specified, use smaller of max_samples or balanced size
-    if max_samples is not None:
-        min_class_count = min(min_class_count, max_samples // len(unique_classes))
-    
-    # Create balanced dataset
+    min_class_count = min(class_counts.min(), max_samples // len(unique_classes))
     balanced_indices = []
     for cls in unique_classes:
-        cls_indices = np.where(y == cls)[0]
+        cls_indices = np.where(y_numeric == cls)[0]
         selected = np.random.choice(cls_indices, min_class_count, replace=False)
         balanced_indices.extend(selected)
     
     balanced_indices = np.array(balanced_indices)
     np.random.shuffle(balanced_indices)
     
-    X_balanced = X[balanced_indices]
-    y_balanced = y[balanced_indices]
+    X_balanced = X_binarized[balanced_indices]
+    y_balanced = y_numeric[balanced_indices]
     
     print(f"   Balanced samples: {len(X_balanced)}")
     unique_classes, class_counts = np.unique(y_balanced, return_counts=True)
@@ -193,102 +230,201 @@ def load_and_preprocess_dataset(csv_path, max_samples=None):
     
     return X_balanced, y_balanced
 
-def train_model(model_name, X_train, X_test, y_train, y_test, models_dir, dataset_name):
-    """Train a single model and return metrics"""
+
+def train_uleen(X_train, X_test, y_train, y_test, **kwargs):
+    """Train ULEEN with custom parameters"""
+    filter_inputs = kwargs.get('filter_inputs', 3)
+    filter_entries = kwargs.get('filter_entries', 16)
+    learning_rate = kwargs.get('learning_rate', 0.01)
+    epochs = kwargs.get('epochs', 10)
+    
+    model = UleenWisard(
+        inputs=X_train.shape[1],
+        classes=2,
+        filter_inputs=filter_inputs,
+        filter_entries=filter_entries,
+        filter_hash_functions=2
+    )
+    
+    optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
+    criterion = nn.CrossEntropyLoss()
+    
+    Xt = torch.tensor(X_train, dtype=torch.long)
+    yt = torch.tensor(y_train, dtype=torch.long)
+    Xt_test = torch.tensor(X_test, dtype=torch.long)
+    
+    model.train()
+    for epoch in range(epochs):
+        optimizer.zero_grad()
+        outputs = model(Xt)
+        loss = criterion(outputs, yt)
+        loss.backward()
+        optimizer.step()
+        model.clamp()
+    
+    model.eval()
+    with torch.no_grad():
+        outputs = model(Xt_test)
+        preds = torch.argmax(outputs, dim=1).numpy()
+    
+    return preds
+
+
+def train_cluswisard(X_train, X_test, y_train, y_test, **kwargs):
+    """Train ClusWiSaRD with custom parameters (wisardpkg 2.0.0a7 API)"""
+    address_size = kwargs.get('address_size', 3)
+    default_bleach = kwargs.get('default_bleach', 0.1)
+    
+    model = wp.ClusWisard(address_size, default_bleach, 10, 5)
+    
+    # Convert to integer binary vectors
+    X_train_int = [[int(x) for x in row] for row in X_train]
+    y_train_str = [str(int(y)) for y in y_train]  # Labels as STRINGS!
+    X_test_int = [[int(x) for x in row] for row in X_test]
+    
+    # Create DataSet objects with string labels
+    train_dataset = wp.DataSet(X_train_int, y_train_str)
+    test_dataset = wp.DataSet(X_test_int)
+    
+    # Train
+    model.train(train_dataset)
+    
+    # Predict - result format is "prediction::confidence"
+    preds = []
+    for i in range(len(X_test)):
+        pred_str = model.classify(test_dataset[i])
+        pred_int = int(pred_str.split("::")[0])
+        preds.append(pred_int)
+    
+    return np.array(preds)
+
+
+def train_torchwnn_wisard(X_train, X_test, y_train, y_test, **kwargs):
+    """Train torchwnn WiSARD model"""
+    if TorchWNNWisard is None:
+        raise ImportError("torchwnn not available")
+    
+    address_size = kwargs.get('address_size', 3)
+    
+    # Convert to torch tensors (long for boolean values)
+    X_train_t = torch.tensor(X_train, dtype=torch.long)
+    y_train_t = torch.tensor(y_train, dtype=torch.long)
+    X_test_t = torch.tensor(X_test, dtype=torch.long)
+    
+    # Create and train model
+    model = TorchWNNWisard(
+        entry_size=X_train.shape[1],
+        n_classes=len(np.unique(y_train)),
+        tuple_size=address_size,
+        bleaching=False
+    )
+    
+    model.fit(X_train_t, y_train_t)
+    
+    # Predict
+    with torch.no_grad():
+        preds_t = model.predict(X_test_t)
+    
+    return preds_t.numpy().astype(int)
+
+
+def train_torchwnn_bloom(X_train, X_test, y_train, y_test, **kwargs):
+    """Train torchwnn BloomWiSARD model"""
+    if BloomWisard is None:
+        raise ImportError("torchwnn BloomWiSARD not available")
+    
+    address_size = kwargs.get('address_size', 3)
+    filter_size = kwargs.get('filter_size', 256)
+    
+    # Convert to torch tensors
+    X_train_t = torch.tensor(X_train, dtype=torch.long)
+    y_train_t = torch.tensor(y_train, dtype=torch.long)
+    X_test_t = torch.tensor(X_test, dtype=torch.long)
+    
+    # Create and train model
+    model = BloomWisard(
+        entry_size=X_train.shape[1],
+        n_classes=len(np.unique(y_train)),
+        tuple_size=address_size,
+        bleaching=False,
+        filter_size=filter_size
+    )
+    
+    model.fit(X_train_t, y_train_t)
+    
+    # Predict
+    with torch.no_grad():
+        preds_t = model.predict(X_test_t)
+    
+    return preds_t.numpy().astype(int)
+
+
+def train_bethown_wisard(X_train, X_test, y_train, y_test, **kwargs):
+    """Train BTHOWeN WiSARD model"""
+    if BTHOWeNWisard is None:
+        raise ImportError("BTHOWeN not available")
+    
+    address_size = kwargs.get('address_size', 3)
+    unit_entries = kwargs.get('unit_entries', 256)  # Must be power of 2
+    unit_hashes = kwargs.get('unit_hashes', 1)
+    
+    # Convert to int (for BTHOWeN which works with numpy)
+    X_train_int = X_train.astype(int)
+    y_train_int = y_train.astype(int)
+    X_test_int = X_test.astype(int)
+    
+    # Create and train model
+    model = BTHOWeNWisard(
+        num_inputs=X_train.shape[1],
+        num_classes=len(np.unique(y_train)),
+        unit_inputs=address_size,
+        unit_entries=unit_entries,
+        unit_hashes=unit_hashes
+    )
+    
+    # Train
+    for sample, label in zip(X_train_int, y_train_int):
+        model.train(sample, int(label))
+    
+    # Predict
+    preds = []
+    for sample in X_test_int:
+        pred_indices = model.predict(sample)
+        # If multiple classes have max response, take the first (lowest index)
+        preds.append(int(pred_indices[0]))
+    
+    return np.array(preds)
+
+
+def train_and_evaluate(model_name, X_train, X_test, y_train, y_test, params):
+    """Train model and evaluate"""
     try:
         start_time = time.time()
         
-        if model_name == 'torchwnn_wisard':
-            device = torch.device("cpu")
-            Xt = torch.tensor(X_train, dtype=torch.long).to(device)
-            yt = torch.tensor(y_train, dtype=torch.long).to(device)
-            Xt_test = torch.tensor(X_test, dtype=torch.long).to(device)
-            yt_test = torch.tensor(y_test, dtype=torch.long).to(device)
-            
-            model = TorchWisard(entry_size=X_train.shape[1], n_classes=2, tuple_size=4)
-            model.fit(Xt, yt)
-            preds = model.predict(Xt_test).cpu().numpy()
-            yt_test = yt_test.cpu().numpy()
-            
-        elif model_name == 'torchwnn_bloomwisard':
-            device = torch.device("cpu")
-            Xt = torch.tensor(X_train, dtype=torch.long).to(device)
-            yt = torch.tensor(y_train, dtype=torch.long).to(device)
-            Xt_test = torch.tensor(X_test, dtype=torch.long).to(device)
-            yt_test = torch.tensor(y_test, dtype=torch.long).to(device)
-            
-            model = TorchBloomWisard(entry_size=X_train.shape[1], n_classes=2, tuple_size=4, filter_size=128, n_hashes=2)
-            model.fit(Xt, yt)
-            preds = model.predict(Xt_test).cpu().numpy()
-            yt_test = yt_test.cpu().numpy()
-            
-        elif model_name == 'bthowen':
-            model = BTHOWenWisard(num_inputs=X_train.shape[1], num_classes=2, unit_inputs=4, unit_entries=16, unit_hashes=2)
-            for i in range(len(X_train)):
-                model.train(X_train[i].astype(bool), y_train[i])
-            
-            preds = []
-            for i in range(len(X_test)):
-                p = model.predict(X_test[i].astype(bool))
-                preds.append(p[0])
-            preds = np.array(preds)
-            
-        elif model_name == 'uleen':
-            model = UleenWisard(inputs=X_train.shape[1], classes=2, filter_inputs=4, filter_entries=16, filter_hash_functions=2)
-            optimizer = torch.optim.Adam(model.parameters(), lr=0.01)
-            criterion = nn.CrossEntropyLoss()
-            
-            Xt = torch.tensor(X_train, dtype=torch.long)
-            yt = torch.tensor(y_train, dtype=torch.long)
-            Xt_test = torch.tensor(X_test, dtype=torch.long)
-            
-            model.train()
-            for epoch in range(5):
-                optimizer.zero_grad()
-                outputs = model(Xt)
-                loss = criterion(outputs, yt)
-                loss.backward()
-                optimizer.step()
-                model.clamp()
-            
-            model.eval()
-            with torch.no_grad():
-                outputs = model(Xt_test)
-                preds = torch.argmax(outputs, dim=1).numpy()
-                
+        if model_name == 'uleen':
+            preds = train_uleen(X_train, X_test, y_train, y_test, **params)
         elif model_name == 'cluswisard':
-            if wp is None:
-                return None
-            
-            X_train_list = X_train.astype(int).tolist()
-            y_train_list = y_train.astype(str).tolist()
-            X_test_list = X_test.astype(int).tolist()
-            y_test_list = y_test.astype(str).tolist()
-            
-            # Use smaller address size based on number of features
-            addressSize = max(2, min(4, X_train.shape[1]))
-            model = wp.ClusWisard(addressSize, 0.1, 10, 5)
-            model.train(X_train_list, y_train_list)
-            preds_raw = model.classify(X_test_list)
-            preds = np.array([int(p) for p in preds_raw])
-            y_test = np.array([int(y) for y in y_test_list])
+            preds = train_cluswisard(X_train, X_test, y_train, y_test, **params)
+        elif model_name == 'torchwnn_wisard':
+            preds = train_torchwnn_wisard(X_train, X_test, y_train, y_test, **params)
+        elif model_name == 'torchwnn_bloom':
+            preds = train_torchwnn_bloom(X_train, X_test, y_train, y_test, **params)
+        elif model_name == 'bethown':
+            preds = train_bethown_wisard(X_train, X_test, y_train, y_test, **params)
         else:
             return None
         
-        execution_time = time.time() - start_time
+        exec_time = time.time() - start_time
         
-        # Debug: Check predictions
-        unique_preds, pred_counts = np.unique(preds, return_counts=True)
-        pred_dist = {int(label): int(count) for label, count in zip(unique_preds, pred_counts)}
-        unique_true, true_counts = np.unique(y_test, return_counts=True)
-        true_dist = {int(label): int(count) for label, count in zip(unique_true, true_counts)}
-        
-        # Calculate metrics
+        # Metrics
         acc = accuracy_score(y_test, preds)
         precision = precision_score(y_test, preds, average='weighted', zero_division=0)
         recall = recall_score(y_test, preds, average='weighted', zero_division=0)
         f1 = f1_score(y_test, preds, average='weighted', zero_division=0)
         cm = confusion_matrix(y_test, preds)
+        
+        unique_preds, pred_counts = np.unique(preds, return_counts=True)
+        pred_dist = {str(int(k)): int(v) for k, v in zip(unique_preds, pred_counts)}
         
         return {
             'accuracy': float(acc),
@@ -297,7 +433,8 @@ def train_model(model_name, X_train, X_test, y_train, y_test, models_dir, datase
             'f1': float(f1),
             'confusion_matrix': cm.tolist(),
             'prediction_distribution': pred_dist,
-            'execution_time': execution_time,
+            'execution_time': float(exec_time),
+            'parameters': {k: (float(v) if isinstance(v, (int, float)) else v) for k, v in params.items()},
             'status': 'success'
         }
         
@@ -307,186 +444,359 @@ def train_model(model_name, X_train, X_test, y_train, y_test, models_dir, datase
             'error': str(e)
         }
 
-# Main execution
-if __name__ == '__main__':
-    # Get all datasets
-    datasets = sorted(glob.glob('_dataset/IoT_*.csv'))
+
+def save_binarized_dataset(X, y, identifier, tags=None):
+    """Save binarized dataset to CSV for inspection"""
+    output_dir = '_results/binarized_datasets'
+    os.makedirs(output_dir, exist_ok=True)
     
+    # Create dataframe from binarized data
+    feature_names = [f"bit_{i}" for i in range(X.shape[1])]
+    df = pd.DataFrame(X, columns=feature_names)
+    df['label'] = y
+    
+    if tags is not None:
+        df['device_origin'] = tags
+    
+    # Save CSV
+    output_file = os.path.join(output_dir, f'binarized_{identifier}.csv')
+    df.to_csv(output_file, index=False)
+    print(f"    📊 Binarized dataset saved: {output_file} ({df.shape})")
+    
+    # Save sample
+    sample_file = os.path.join(output_dir, f'binarized_{identifier}_sample.csv')
+    df.head(100).to_csv(sample_file, index=False)
+    print(f"    📊 Sample saved: {sample_file}")
+    
+    return df
+
+
+def main():
     print(f"\n{'='*70}")
-    print(f"MULTI-DATASET TRAINING RUN: {timestamp}")
+    print(f"TRAINING ALL MODELS WITH DENSE BINARIZATION: {timestamp}")
     print(f"{'='*70}")
-    print(f"Found {len(datasets)} datasets")
     
-    # Dataset parameters
-    max_samples_per_dataset = 25000  # Balanced subset size (5K per class)
+    available_models = ['uleen', 'cluswisard', 'torchwnn_wisard', 'torchwnn_bloom', 'bethown']
+    if not wp:
+        available_models.remove('cluswisard')
+    if TorchWNNWisard is None:
+        available_models.remove('torchwnn_wisard')
+        available_models.remove('torchwnn_bloom')
+    if BTHOWeNWisard is None:
+        available_models.remove('bethown')
     
-    # Models to train
-    models = ['torchwnn_wisard', 'torchwnn_bloomwisard', 'bthowen', 'uleen', 'cluswisard']
+    print(f"Available models: {', '.join(available_models)}")
     
-    # Results structure
-    all_results = {
+    # Get datasets
+    datasets = sorted([f for f in os.listdir('_dataset') if f.startswith('IoT_') and f.endswith('.csv')])
+    print(f"Found {len(datasets)} datasets: {', '.join([d.replace('IoT_', '').replace('.csv', '') for d in datasets])}")
+    
+    max_samples_per_dataset = None
+    results = {
         'timestamp': timestamp,
+        'available_models': available_models,
         'datasets': {},
         'combined': {}
     }
     
-    # 1. Train on individual datasets
+    # ========== PHASE 1: Individual datasets ==========
     print(f"\n{'='*70}")
     print("PHASE 1: Training on Individual Datasets")
     print(f"{'='*70}")
     
-    all_X_train_combined = []
-    all_X_test_combined = []
-    all_y_train_combined = []
-    all_y_test_combined = []
+    all_X_train = []
+    all_X_test = []
+    all_y_train = []
+    all_y_test = []
+    all_X_full = []
+    all_y_full = []
+    dataset_origins = []
+    dataset_max_features = 0  # Track maximum features
     
-    for dataset_path in datasets:
-        dataset_name = os.path.basename(dataset_path).replace('.csv', '').replace('IoT_', '')
+    # First pass: determine maximum features and save datasets
+    for dataset_file in datasets:
+        dataset_path = os.path.join('_dataset', dataset_file)
+        dataset_name = dataset_file.replace('.csv', '').replace('IoT_', '')
+        
         print(f"\n{'─'*70}")
         print(f"Dataset: {dataset_name}")
         print(f"{'─'*70}")
         
-        # Load and preprocess
-        X_bin, y = load_and_preprocess_dataset(dataset_path, max_samples=max_samples_per_dataset)
+        X, y = load_and_preprocess_dataset(dataset_path, max_samples=max_samples_per_dataset)
         
-        # Skip if loading failed
-        if X_bin is None or y is None:
-            print(f"   ⚠️  Skipping {dataset_name} - failed to load")
+        if X is None:
+            print(f"   ⚠️  Skipping - failed to load")
             continue
         
-        # Debug: Show feature statistics
-        print(f"   📊 Feature stats:")
-        print(f"      Shape: {X_bin.shape}, Data type: {X_bin.dtype}")
-        print(f"      Feature mins: {X_bin.min(axis=0)[:5]}")
-        print(f"      Feature maxs: {X_bin.max(axis=0)[:5]}")
-        print(f"      Feature means: {X_bin.mean(axis=0)[:5].round(3)}")
-        print(f"      Feature stds: {X_bin.std(axis=0)[:5].round(3)}")
+        # Track maximum features
+        dataset_max_features = max(dataset_max_features, X.shape[1])
         
-        X_train, X_test, y_train, y_test = train_test_split(X_bin, y, test_size=0.3, random_state=42)
+        # Save full binarized dataset
+        print(f"\n  💾 Saving binarized dataset...")
+        device_tags = np.array([dataset_name] * len(X))
+        save_binarized_dataset(X, y, dataset_name, tags=device_tags)
         
-        all_results['datasets'][dataset_name] = {
-            'n_samples': len(X_bin),
-            'n_features': X_bin.shape[1],
-            'models': {}
-        }
+        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3, random_state=42)
+        all_X_train.append(X_train)
+        all_X_test.append(X_test)
+        all_y_train.append(y_train)
+        all_y_test.append(y_test)
+        all_X_full.append(X)
+        all_y_full.append(y)
+        dataset_origins.append([dataset_name] * len(X))
         
-        # Collect for combined dataset
-        all_X_train_combined.append(X_train)
-        all_X_test_combined.append(X_test)
-        all_y_train_combined.append(y_train)
-        all_y_test_combined.append(y_test)
+        results['datasets'][dataset_name] = {'models': {}, 'binarized_shape': X.shape}
+    
+    # Pad all datasets to have the same number of features
+    if all_X_full:
+        print(f"\n📐 Padding datasets to {dataset_max_features} features...")
+        for i in range(len(all_X_train)):
+            if all_X_train[i].shape[1] < dataset_max_features:
+                pad_size = dataset_max_features - all_X_train[i].shape[1]
+                all_X_train[i] = np.pad(all_X_train[i], ((0, 0), (0, pad_size)))
+                all_X_test[i] = np.pad(all_X_test[i], ((0, 0), (0, pad_size)))
+                all_X_full[i] = np.pad(all_X_full[i], ((0, 0), (0, pad_size)))
+    
+    # Second pass: train all models on each dataset
+    print(f"\n{'='*70}")
+    print("PHASE 1: Training Models on Individual Datasets")
+    print(f"{'='*70}")
+    
+    # Second pass: train all models on each dataset
+    print(f"\n{'='*70}")
+    print("PHASE 1: Training Models on Individual Datasets")
+    print(f"{'='*70}")
+    
+    dataset_names_list = list(results['datasets'].keys())
+    
+    for idx, dataset_name in enumerate(dataset_names_list):
+        print(f"\n{'─'*70}")
+        print(f"Dataset: {dataset_name} ({idx+1}/{len(dataset_names_list)})")
+        print(f"{'─'*70}")
         
-        # Train each model
-        for model_name in models:
-            print(f"  Training {model_name}...", end=' ', flush=True)
-            result = train_model(model_name, X_train, X_test, y_train, y_test, 
-                               f'_results/models_{timestamp}', dataset_name)
+        X_train = all_X_train[idx]
+        X_test = all_X_test[idx]
+        y_train = all_y_train[idx]
+        y_test = all_y_test[idx]
+        
+        # Train all available models
+        for model_name in available_models:
+            print(f"\n  🔍 Testing {model_name.upper()}...")
+            best_result = None
+            best_params = None
             
-            if result is None:
-                print("⊘ Skipped")
+            # Generate parameter configurations for each model
+            if model_name == 'uleen':
+                configs = list(product([2, 3], [8, 16], [0.001, 0.01, 0.1], [5, 10]))[:10]
+                config_params = [
+                    {'filter_inputs': c[0], 'filter_entries': c[1], 'learning_rate': c[2], 'epochs': c[3]}
+                    for c in configs
+                ]
+                config_names = [
+                    f"f_in={c[0]}, f_ent={c[1]}, lr={c[2]}, ep={c[3]}"
+                    for c in configs
+                ]
+            
+            elif model_name == 'cluswisard':
+                configs = list(product([2, 3, 4], [0.05, 0.1, 0.2]))[:9]
+                config_params = [
+                    {'address_size': c[0], 'default_bleach': c[1]}
+                    for c in configs
+                ]
+                config_names = [
+                    f"addr_sz={c[0]}, bleach={c[1]}"
+                    for c in configs
+                ]
+            
+            elif model_name == 'torchwnn_wisard':
+                configs = [[2], [3], [4]]
+                config_params = [{'address_size': c[0]} for c in configs]
+                config_names = [f"addr_sz={c[0]}" for c in configs]
+            
+            elif model_name == 'torchwnn_bloom':
+                configs = list(product([2, 3], [128, 256]))[:4]
+                config_params = [
+                    {'address_size': c[0], 'filter_size': c[1]}
+                    for c in configs
+                ]
+                config_names = [
+                    f"addr_sz={c[0]}, filt_sz={c[1]}"
+                    for c in configs
+                ]
+            
+            elif model_name == 'bethown':
+                configs = list(product([2, 3], [128, 256]))[:4]
+                config_params = [
+                    {'address_size': c[0], 'unit_entries': c[1]}
+                    for c in configs
+                ]
+                config_names = [
+                    f"addr_sz={c[0]}, ent={c[1]}"
+                    for c in configs
+                ]
+            
+            else:
                 continue
             
-            if result['status'] == 'success':
-                acc = result['accuracy']
-                f1 = result['f1']
-                exec_time = result['execution_time']
-                print(f"✓ Acc: {acc:.4f}, F1: {f1:.4f}, Time: {exec_time:.2f}s")
-                all_results['datasets'][dataset_name]['models'][model_name] = result
+            for i, params in enumerate(config_params):
+                try:
+                    result = train_and_evaluate(model_name, X_train, X_test, y_train, y_test, params)
+                    
+                    if result and result['status'] == 'success':
+                        acc = result['accuracy']
+                        f1 = result['f1']
+                        print(f"    ✓ {config_names[i]}: Acc={acc:.4f}, F1={f1:.4f}, Time={result['execution_time']:.2f}s")
+                        
+                        if best_result is None or result['f1'] > best_result['f1']:
+                            best_result = result
+                            best_params = params
+                    else:
+                        print(f"    ✗ {config_names[i]}: Failed - {result.get('error', 'Unknown error')}")
+                except Exception as e:
+                    print(f"    ✗ {config_names[i]}: Exception - {str(e)}")
+            
+            if best_result:
+                results['datasets'][dataset_name]['models'][model_name] = best_result
+    
+    # ========== PHASE 2: Combined dataset ==========
+    if all_X_train:
+        print(f"\n{'='*70}")
+        print("PHASE 2: Training on Combined Dataset")
+        print(f"{'='*70}")
+        
+        # Combine all full datasets (already padded)
+        X_combined_full = np.vstack(all_X_full)
+        y_combined_full = np.hstack(all_y_full)
+        origins_combined = np.hstack(dataset_origins)
+        
+        print(f"Combined dataset shape: {X_combined_full.shape}")
+        
+        # Save combined binarized dataset
+        print(f"\n  💾 Saving combined binarized dataset...")
+        save_binarized_dataset(X_combined_full, y_combined_full, 'combined', tags=origins_combined)
+        
+        # Combine train/test splits (already padded)
+        X_train_combined = np.vstack(all_X_train)
+        X_test_combined = np.vstack(all_X_test)
+        y_train_combined = np.hstack(all_y_train)
+        y_test_combined = np.hstack(all_y_test)
+        
+        print(f"Combined train: {X_train_combined.shape}")
+        print(f"Combined test: {X_test_combined.shape}")
+        
+        results['combined']['binarized_shape'] = X_combined_full.shape
+        
+        # Train all models on combined
+        for model_name in available_models:
+            print(f"\n  🔍 Testing {model_name.upper()} on combined...")
+            best_result = None
+            best_params = None
+            
+            # Generate parameter configurations
+            if model_name == 'uleen':
+                configs = list(product([2, 3], [8, 16], [0.001, 0.01, 0.1], [5, 10]))[:10]
+                config_params = [
+                    {'filter_inputs': c[0], 'filter_entries': c[1], 'learning_rate': c[2], 'epochs': c[3]}
+                    for c in configs
+                ]
+                config_names = [
+                    f"f_in={c[0]}, f_ent={c[1]}, lr={c[2]}, ep={c[3]}"
+                    for c in configs
+                ]
+            
+            elif model_name == 'cluswisard':
+                configs = list(product([2, 3, 4], [0.05, 0.1, 0.2]))[:9]
+                config_params = [
+                    {'address_size': c[0], 'default_bleach': c[1]}
+                    for c in configs
+                ]
+                config_names = [
+                    f"addr_sz={c[0]}, bleach={c[1]}"
+                    for c in configs
+                ]
+            
+            elif model_name == 'torchwnn_wisard':
+                configs = [[2], [3], [4]]
+                config_params = [{'address_size': c[0]} for c in configs]
+                config_names = [f"addr_sz={c[0]}" for c in configs]
+            
+            elif model_name == 'torchwnn_bloom':
+                configs = list(product([2, 3], [128, 256]))[:4]
+                config_params = [
+                    {'address_size': c[0], 'filter_size': c[1]}
+                    for c in configs
+                ]
+                config_names = [
+                    f"addr_sz={c[0]}, filt_sz={c[1]}"
+                    for c in configs
+                ]
+            
+            elif model_name == 'bethown':
+                configs = list(product([2, 3], [128, 256]))[:4]
+                config_params = [
+                    {'address_size': c[0], 'unit_entries': c[1]}
+                    for c in configs
+                ]
+                config_names = [
+                    f"addr_sz={c[0]}, ent={c[1]}"
+                    for c in configs
+                ]
+            
             else:
-                print(f"✗ Failed: {result['error'][:50]}")
+                continue
+            
+            for i, params in enumerate(config_params):
+                try:
+                    result = train_and_evaluate(model_name, X_train_combined, X_test_combined, 
+                                               y_train_combined, y_test_combined, params)
+                    
+                    if result and result['status'] == 'success':
+                        acc = result['accuracy']
+                        f1 = result['f1']
+                        print(f"    ✓ {config_names[i]}: Acc={acc:.4f}, F1={f1:.4f}, Time={result['execution_time']:.2f}s")
+                        
+                        if best_result is None or result['f1'] > best_result['f1']:
+                            best_result = result
+                            best_params = params
+                    else:
+                        print(f"    ✗ {config_names[i]}: Failed - {result.get('error', 'Unknown error')}")
+                except Exception as e:
+                    print(f"    ✗ {config_names[i]}: Exception - {str(e)}")
+            
+            if best_result:
+                results['combined']['models'] = results['combined'].get('models', {})
+                results['combined']['models'][model_name] = best_result
     
-    # 2. Train on combined dataset
+    # ========== Save results ==========
     print(f"\n{'='*70}")
-    print("PHASE 2: Training on Combined Dataset")
+    print("SAVING RESULTS")
     print(f"{'='*70}")
     
-    # Find max features across all datasets
-    max_features = max([X.shape[1] for X in all_X_train_combined])
-    print(f"\nMax features across datasets: {max_features}")
-    
-    # Pad all datasets to have same feature count
-    X_train_padded = []
-    X_test_padded = []
-    for X_train, X_test in zip(all_X_train_combined, all_X_test_combined):
-        if X_train.shape[1] < max_features:
-            # Pad with zeros
-            pad_train = np.pad(X_train, ((0, 0), (0, max_features - X_train.shape[1])), mode='constant')
-            pad_test = np.pad(X_test, ((0, 0), (0, max_features - X_test.shape[1])), mode='constant')
-        else:
-            pad_train = X_train
-            pad_test = X_test
-        X_train_padded.append(pad_train)
-        X_test_padded.append(pad_test)
-    
-    X_train_combined = np.vstack(X_train_padded)
-    X_test_combined = np.vstack(X_test_padded)
-    y_train_combined = np.hstack(all_y_train_combined)
-    y_test_combined = np.hstack(all_y_test_combined)
-    
-    print(f"\nCombined dataset statistics:")
-    print(f"  Total train samples: {len(X_train_combined)}")
-    print(f"  Total test samples: {len(X_test_combined)}")
-    print(f"  Features: {X_train_combined.shape[1]}")
-    unique, counts = np.unique(y_train_combined, return_counts=True)
-    print(f"  Class distribution (train): {dict(zip(unique, counts))}")
-    
-    all_results['combined'] = {
-        'n_train_samples': len(X_train_combined),
-        'n_test_samples': len(X_test_combined),
-        'n_features': X_train_combined.shape[1],
-        'models': {}
-    }
-    
-    print(f"\n{'─'*70}")
-    for model_name in models:
-        print(f"Training {model_name}...", end=' ', flush=True)
-        result = train_model(model_name, X_train_combined, X_test_combined, 
-                           y_train_combined, y_test_combined,
-                           f'_results/models_{timestamp}', 'combined')
-        
-        if result is None:
-            print("⊘ Skipped")
-            continue
-        
-        if result['status'] == 'success':
-            acc = result['accuracy']
-            f1 = result['f1']
-            exec_time = result['execution_time']
-            print(f"✓ Acc: {acc:.4f}, F1: {f1:.4f}, Time: {exec_time:.2f}s")
-            all_results['combined']['models'][model_name] = result
-        else:
-            print(f"✗ Failed: {result['error'][:50]}")
-    
-    # 3. Save results
-    print(f"\n{'='*70}")
-    print("PHASE 3: Saving Results")
-    print(f"{'='*70}")
-    
-    results_file = f'_results/multi_dataset_results_{timestamp}.json'
+    results_file = f'_results/all_models_{timestamp}.json'
     with open(results_file, 'w') as f:
-        json.dump(all_results, f, indent=2)
+        json.dump(results, f, indent=2)
     
-    print(f"\n✓ Results saved to: {results_file}")
+    print(f"✓ Results saved to: {results_file}")
     
-    # 4. Summary table
+    # Print summary
     print(f"\n{'='*70}")
     print("SUMMARY")
     print(f"{'='*70}")
     
-    print("\n📊 Individual Dataset Results:")
-    for dataset_name, dataset_results in all_results['datasets'].items():
-        print(f"\n  {dataset_name}:")
-        for model_name, model_results in dataset_results['models'].items():
-            acc = model_results['accuracy']
-            f1 = model_results['f1']
-            time_val = model_results['execution_time']
-            print(f"    {model_name}: Acc={acc:.4f}, F1={f1:.4f}, Time={time_val:.2f}s")
+    print(f"\n📊 Binarized datasets saved to: _results/binarized_datasets/")
     
-    print(f"\n📊 Combined Dataset Results:")
-    for model_name, model_results in all_results['combined']['models'].items():
-        acc = model_results['accuracy']
-        f1 = model_results['f1']
-        time_val = model_results['execution_time']
-        print(f"  {model_name}: Acc={acc:.4f}, F1={f1:.4f}, Time={time_val:.2f}s")
+    for dataset_name, dataset_results in results['datasets'].items():
+        print(f"\n{dataset_name} (shape: {dataset_results.get('binarized_shape', 'N/A')}):")
+        for model_name, model_result in dataset_results['models'].items():
+            if 'accuracy' in model_result:
+                print(f"  {model_name}: Acc={model_result['accuracy']:.4f}, F1={model_result['f1']:.4f}, Time={model_result['execution_time']:.2f}s")
     
-    print(f"\n{'='*70}\n")
+    if 'combined' in results and 'models' in results['combined']:
+        print(f"\nCombined (shape: {results['combined'].get('binarized_shape', 'N/A')}):")
+        for model_name, model_result in results['combined']['models'].items():
+            if 'accuracy' in model_result:
+                print(f"  {model_name}: Acc={model_result['accuracy']:.4f}, F1={model_result['f1']:.4f}, Time={model_result['execution_time']:.2f}s")
+
+
+if __name__ == '__main__':
+    main()
