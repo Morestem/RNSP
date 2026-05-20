@@ -1,0 +1,907 @@
+{
+  "timestamp": "20260520_022347",
+  "available_models": [
+    "uleen",
+    "cluswisard",
+    "torchwnn_wisard",
+    "torchwnn_bloom",
+    "bethown"
+  ],
+  "datasets": {
+    "Fridge": {
+      "models": {
+        "uleen": {
+          "accuracy": 0.7266666666666667,
+          "precision": 0.822148100764568,
+          "recall": 0.7266666666666667,
+          "f1": 0.7061677501189154,
+          "confusion_matrix": [
+            [
+              703,
+              817
+            ],
+            [
+              3,
+              1477
+            ]
+          ],
+          "prediction_distribution": {
+            "0": 706,
+            "1": 2294
+          },
+          "execution_time": 0.22470760345458984,
+          "parameters": {
+            "filter_inputs": 2.0,
+            "filter_entries": 8.0,
+            "learning_rate": 0.1,
+            "epochs": 10.0
+          },
+          "status": "success"
+        },
+        "cluswisard": {
+          "accuracy": 0.9003333333333333,
+          "precision": 0.9008415179401809,
+          "recall": 0.9003333333333333,
+          "f1": 0.9003271206942524,
+          "confusion_matrix": [
+            [
+              1345,
+              175
+            ],
+            [
+              124,
+              1356
+            ]
+          ],
+          "prediction_distribution": {
+            "0": 1469,
+            "1": 1531
+          },
+          "execution_time": 0.40799379348754883,
+          "parameters": {
+            "address_size": 4.0,
+            "default_bleach": 0.1
+          },
+          "status": "success"
+        },
+        "torchwnn_wisard": {
+          "accuracy": 0.5066666666666667,
+          "precision": 0.25671111111111117,
+          "recall": 0.5066666666666667,
+          "f1": 0.34076696165191744,
+          "confusion_matrix": [
+            [
+              1520,
+              0
+            ],
+            [
+              1480,
+              0
+            ]
+          ],
+          "prediction_distribution": {
+            "0": 3000
+          },
+          "execution_time": 0.7230503559112549,
+          "parameters": {
+            "address_size": 2.0
+          },
+          "status": "success"
+        },
+        "bethown": {
+          "accuracy": 0.5066666666666667,
+          "precision": 0.25671111111111117,
+          "recall": 0.5066666666666667,
+          "f1": 0.34076696165191744,
+          "confusion_matrix": [
+            [
+              1520,
+              0
+            ],
+            [
+              1480,
+              0
+            ]
+          ],
+          "prediction_distribution": {
+            "0": 3000
+          },
+          "execution_time": 7.260646343231201,
+          "parameters": {
+            "address_size": 2.0,
+            "unit_entries": 128.0
+          },
+          "status": "success"
+        }
+      },
+      "binarized_shape": [
+        10000,
+        41
+      ]
+    },
+    "GPS_Tracker": {
+      "models": {
+        "uleen": {
+          "accuracy": 0.7953333333333333,
+          "precision": 0.8073257123623503,
+          "recall": 0.7953333333333333,
+          "f1": 0.7924475653727214,
+          "confusion_matrix": [
+            [
+              992,
+              462
+            ],
+            [
+              152,
+              1394
+            ]
+          ],
+          "prediction_distribution": {
+            "0": 1144,
+            "1": 1856
+          },
+          "execution_time": 0.23331332206726074,
+          "parameters": {
+            "filter_inputs": 2.0,
+            "filter_entries": 8.0,
+            "learning_rate": 0.1,
+            "epochs": 10.0
+          },
+          "status": "success"
+        },
+        "cluswisard": {
+          "accuracy": 0.966,
+          "precision": 0.966011634940402,
+          "recall": 0.966,
+          "f1": 0.9660019509365696,
+          "confusion_matrix": [
+            [
+              1406,
+              48
+            ],
+            [
+              54,
+              1492
+            ]
+          ],
+          "prediction_distribution": {
+            "0": 1460,
+            "1": 1540
+          },
+          "execution_time": 0.2697138786315918,
+          "parameters": {
+            "address_size": 4.0,
+            "default_bleach": 0.05
+          },
+          "status": "success"
+        },
+        "torchwnn_wisard": {
+          "accuracy": 0.4846666666666667,
+          "precision": 0.23490177777777776,
+          "recall": 0.4846666666666667,
+          "f1": 0.3164370603203113,
+          "confusion_matrix": [
+            [
+              1454,
+              0
+            ],
+            [
+              1546,
+              0
+            ]
+          ],
+          "prediction_distribution": {
+            "0": 3000
+          },
+          "execution_time": 0.5715813636779785,
+          "parameters": {
+            "address_size": 2.0
+          },
+          "status": "success"
+        },
+        "bethown": {
+          "accuracy": 0.505,
+          "precision": 0.7551105818305546,
+          "recall": 0.505,
+          "f1": 0.35995402257169046,
+          "confusion_matrix": [
+            [
+              1454,
+              0
+            ],
+            [
+              1485,
+              61
+            ]
+          ],
+          "prediction_distribution": {
+            "0": 2939,
+            "1": 61
+          },
+          "execution_time": 0.6343889236450195,
+          "parameters": {
+            "address_size": 3.0,
+            "unit_entries": 256.0
+          },
+          "status": "success"
+        }
+      },
+      "binarized_shape": [
+        10000,
+        56
+      ]
+    },
+    "Garage_Door": {
+      "models": {
+        "uleen": {
+          "accuracy": 0.8266666666666667,
+          "precision": 0.8300786107125777,
+          "recall": 0.8266666666666667,
+          "f1": 0.826290404574516,
+          "confusion_matrix": [
+            [
+              1175,
+              335
+            ],
+            [
+              185,
+              1305
+            ]
+          ],
+          "prediction_distribution": {
+            "0": 1360,
+            "1": 1640
+          },
+          "execution_time": 0.2108592987060547,
+          "parameters": {
+            "filter_inputs": 2.0,
+            "filter_entries": 8.0,
+            "learning_rate": 0.1,
+            "epochs": 10.0
+          },
+          "status": "success"
+        },
+        "cluswisard": {
+          "accuracy": 0.9373333333333334,
+          "precision": 0.9388203752074781,
+          "recall": 0.9373333333333334,
+          "f1": 0.937267071457943,
+          "confusion_matrix": [
+            [
+              1460,
+              50
+            ],
+            [
+              138,
+              1352
+            ]
+          ],
+          "prediction_distribution": {
+            "0": 1598,
+            "1": 1402
+          },
+          "execution_time": 0.3942134380340576,
+          "parameters": {
+            "address_size": 3.0,
+            "default_bleach": 0.05
+          },
+          "status": "success"
+        },
+        "torchwnn_wisard": {
+          "accuracy": 0.5033333333333333,
+          "precision": 0.2533444444444444,
+          "recall": 0.5033333333333333,
+          "f1": 0.3370436067997044,
+          "confusion_matrix": [
+            [
+              1510,
+              0
+            ],
+            [
+              1490,
+              0
+            ]
+          ],
+          "prediction_distribution": {
+            "0": 3000
+          },
+          "execution_time": 0.5223488807678223,
+          "parameters": {
+            "address_size": 2.0
+          },
+          "status": "success"
+        },
+        "bethown": {
+          "accuracy": 0.5033333333333333,
+          "precision": 0.2533444444444444,
+          "recall": 0.5033333333333333,
+          "f1": 0.3370436067997044,
+          "confusion_matrix": [
+            [
+              1510,
+              0
+            ],
+            [
+              1490,
+              0
+            ]
+          ],
+          "prediction_distribution": {
+            "0": 3000
+          },
+          "execution_time": 0.843123197555542,
+          "parameters": {
+            "address_size": 2.0,
+            "unit_entries": 128.0
+          },
+          "status": "success"
+        }
+      },
+      "binarized_shape": [
+        10000,
+        26
+      ]
+    },
+    "Modbus": {
+      "models": {
+        "uleen": {
+          "accuracy": 0.7806666666666666,
+          "precision": 0.7876983534355105,
+          "recall": 0.7806666666666666,
+          "f1": 0.7797687132568618,
+          "confusion_matrix": [
+            [
+              1089,
+              441
+            ],
+            [
+              217,
+              1253
+            ]
+          ],
+          "prediction_distribution": {
+            "0": 1306,
+            "1": 1694
+          },
+          "execution_time": 0.1097877025604248,
+          "parameters": {
+            "filter_inputs": 2.0,
+            "filter_entries": 8.0,
+            "learning_rate": 0.1,
+            "epochs": 5.0
+          },
+          "status": "success"
+        },
+        "cluswisard": {
+          "accuracy": 0.8963333333333333,
+          "precision": 0.8964415569153877,
+          "recall": 0.8963333333333333,
+          "f1": 0.8963035778489046,
+          "confusion_matrix": [
+            [
+              1389,
+              141
+            ],
+            [
+              170,
+              1300
+            ]
+          ],
+          "prediction_distribution": {
+            "0": 1559,
+            "1": 1441
+          },
+          "execution_time": 0.25380396842956543,
+          "parameters": {
+            "address_size": 4.0,
+            "default_bleach": 0.1
+          },
+          "status": "success"
+        },
+        "torchwnn_wisard": {
+          "accuracy": 0.511,
+          "precision": 0.6523639398998331,
+          "recall": 0.511,
+          "f1": 0.3473161906545557,
+          "confusion_matrix": [
+            [
+              1529,
+              1
+            ],
+            [
+              1466,
+              4
+            ]
+          ],
+          "prediction_distribution": {
+            "0": 2995,
+            "1": 5
+          },
+          "execution_time": 0.2898728847503662,
+          "parameters": {
+            "address_size": 3.0
+          },
+          "status": "success"
+        },
+        "bethown": {
+          "accuracy": 0.513,
+          "precision": 0.7063411295963989,
+          "recall": 0.513,
+          "f1": 0.3517333267191014,
+          "confusion_matrix": [
+            [
+              1529,
+              1
+            ],
+            [
+              1460,
+              10
+            ]
+          ],
+          "prediction_distribution": {
+            "0": 2989,
+            "1": 11
+          },
+          "execution_time": 0.6480612754821777,
+          "parameters": {
+            "address_size": 3.0,
+            "unit_entries": 256.0
+          },
+          "status": "success"
+        }
+      },
+      "binarized_shape": [
+        10000,
+        90
+      ]
+    },
+    "Motion_Light": {
+      "models": {
+        "uleen": {
+          "accuracy": 0.7526666666666667,
+          "precision": 0.7531797270955167,
+          "recall": 0.7526666666666667,
+          "f1": 0.7525126608551267,
+          "confusion_matrix": [
+            [
+              1089,
+              406
+            ],
+            [
+              336,
+              1169
+            ]
+          ],
+          "prediction_distribution": {
+            "0": 1425,
+            "1": 1575
+          },
+          "execution_time": 0.10884618759155273,
+          "parameters": {
+            "filter_inputs": 2.0,
+            "filter_entries": 8.0,
+            "learning_rate": 0.001,
+            "epochs": 5.0
+          },
+          "status": "success"
+        },
+        "cluswisard": {
+          "accuracy": 0.9476666666666667,
+          "precision": 0.9476817373128209,
+          "recall": 0.9476666666666667,
+          "f1": 0.9476656722934479,
+          "confusion_matrix": [
+            [
+              1412,
+              83
+            ],
+            [
+              74,
+              1431
+            ]
+          ],
+          "prediction_distribution": {
+            "0": 1486,
+            "1": 1514
+          },
+          "execution_time": 0.27591466903686523,
+          "parameters": {
+            "address_size": 4.0,
+            "default_bleach": 0.05
+          },
+          "status": "success"
+        },
+        "torchwnn_wisard": {
+          "accuracy": 0.565,
+          "precision": 0.7677410714285714,
+          "recall": 0.565,
+          "f1": 0.4646119575718885,
+          "confusion_matrix": [
+            [
+              1495,
+              0
+            ],
+            [
+              1305,
+              200
+            ]
+          ],
+          "prediction_distribution": {
+            "0": 2800,
+            "1": 200
+          },
+          "execution_time": 0.32651424407958984,
+          "parameters": {
+            "address_size": 4.0
+          },
+          "status": "success"
+        },
+        "bethown": {
+          "accuracy": 0.49833333333333335,
+          "precision": 0.24833611111111112,
+          "recall": 0.49833333333333335,
+          "f1": 0.3314831294030404,
+          "confusion_matrix": [
+            [
+              1495,
+              0
+            ],
+            [
+              1505,
+              0
+            ]
+          ],
+          "prediction_distribution": {
+            "0": 3000
+          },
+          "execution_time": 0.8360772132873535,
+          "parameters": {
+            "address_size": 2.0,
+            "unit_entries": 128.0
+          },
+          "status": "success"
+        }
+      },
+      "binarized_shape": [
+        10000,
+        26
+      ]
+    },
+    "Thermostat": {
+      "models": {
+        "uleen": {
+          "accuracy": 0.8866666666666667,
+          "precision": 0.8995060477681587,
+          "recall": 0.8866666666666667,
+          "f1": 0.8856713661361538,
+          "confusion_matrix": [
+            [
+              1185,
+              305
+            ],
+            [
+              35,
+              1475
+            ]
+          ],
+          "prediction_distribution": {
+            "0": 1220,
+            "1": 1780
+          },
+          "execution_time": 0.2101304531097412,
+          "parameters": {
+            "filter_inputs": 2.0,
+            "filter_entries": 8.0,
+            "learning_rate": 0.1,
+            "epochs": 10.0
+          },
+          "status": "success"
+        },
+        "cluswisard": {
+          "accuracy": 0.9313333333333333,
+          "precision": 0.9313751801494292,
+          "recall": 0.9313333333333333,
+          "f1": 0.9313339742247857,
+          "confusion_matrix": [
+            [
+              1394,
+              96
+            ],
+            [
+              110,
+              1400
+            ]
+          ],
+          "prediction_distribution": {
+            "0": 1504,
+            "1": 1496
+          },
+          "execution_time": 0.3087296485900879,
+          "parameters": {
+            "address_size": 4.0,
+            "default_bleach": 0.05
+          },
+          "status": "success"
+        },
+        "torchwnn_wisard": {
+          "accuracy": 0.49666666666666665,
+          "precision": 0.24667777777777777,
+          "recall": 0.49666666666666665,
+          "f1": 0.3296362286562732,
+          "confusion_matrix": [
+            [
+              1490,
+              0
+            ],
+            [
+              1510,
+              0
+            ]
+          ],
+          "prediction_distribution": {
+            "0": 3000
+          },
+          "execution_time": 0.5540859699249268,
+          "parameters": {
+            "address_size": 2.0
+          },
+          "status": "success"
+        },
+        "bethown": {
+          "accuracy": 0.49666666666666665,
+          "precision": 0.24667777777777777,
+          "recall": 0.49666666666666665,
+          "f1": 0.3296362286562732,
+          "confusion_matrix": [
+            [
+              1490,
+              0
+            ],
+            [
+              1510,
+              0
+            ]
+          ],
+          "prediction_distribution": {
+            "0": 3000
+          },
+          "execution_time": 0.8508141040802002,
+          "parameters": {
+            "address_size": 2.0,
+            "unit_entries": 128.0
+          },
+          "status": "success"
+        }
+      },
+      "binarized_shape": [
+        10000,
+        41
+      ]
+    },
+    "Weather": {
+      "models": {
+        "uleen": {
+          "accuracy": 0.6656666666666666,
+          "precision": 0.6784061615956569,
+          "recall": 0.6656666666666666,
+          "f1": 0.6580446277619884,
+          "confusion_matrix": [
+            [
+              1235,
+              290
+            ],
+            [
+              713,
+              762
+            ]
+          ],
+          "prediction_distribution": {
+            "0": 1948,
+            "1": 1052
+          },
+          "execution_time": 0.10673403739929199,
+          "parameters": {
+            "filter_inputs": 2.0,
+            "filter_entries": 8.0,
+            "learning_rate": 0.1,
+            "epochs": 5.0
+          },
+          "status": "success"
+        },
+        "cluswisard": {
+          "accuracy": 0.8983333333333333,
+          "precision": 0.9015387704406418,
+          "recall": 0.8983333333333333,
+          "f1": 0.8980428046855982,
+          "confusion_matrix": [
+            [
+              1441,
+              84
+            ],
+            [
+              221,
+              1254
+            ]
+          ],
+          "prediction_distribution": {
+            "0": 1662,
+            "1": 1338
+          },
+          "execution_time": 0.3281056880950928,
+          "parameters": {
+            "address_size": 4.0,
+            "default_bleach": 0.05
+          },
+          "status": "success"
+        },
+        "torchwnn_wisard": {
+          "accuracy": 0.5126666666666667,
+          "precision": 0.7511940631625935,
+          "recall": 0.5126666666666667,
+          "f1": 0.35221166495081224,
+          "confusion_matrix": [
+            [
+              1525,
+              0
+            ],
+            [
+              1462,
+              13
+            ]
+          ],
+          "prediction_distribution": {
+            "0": 2987,
+            "1": 13
+          },
+          "execution_time": 0.25089216232299805,
+          "parameters": {
+            "address_size": 4.0
+          },
+          "status": "success"
+        },
+        "bethown": {
+          "accuracy": 0.5083333333333333,
+          "precision": 0.25840277777777776,
+          "recall": 0.5083333333333333,
+          "f1": 0.342633517495396,
+          "confusion_matrix": [
+            [
+              1525,
+              0
+            ],
+            [
+              1475,
+              0
+            ]
+          ],
+          "prediction_distribution": {
+            "0": 3000
+          },
+          "execution_time": 0.8500962257385254,
+          "parameters": {
+            "address_size": 2.0,
+            "unit_entries": 128.0
+          },
+          "status": "success"
+        }
+      },
+      "binarized_shape": [
+        10000,
+        73
+      ]
+    }
+  },
+  "combined": {
+    "binarized_shape": [
+      70000,
+      90
+    ],
+    "models": {
+      "uleen": {
+        "accuracy": 0.7532857142857143,
+        "precision": 0.7827009680711808,
+        "recall": 0.7532857142857143,
+        "f1": 0.7468264181991517,
+        "confusion_matrix": [
+          [
+            6244,
+            4280
+          ],
+          [
+            901,
+            9575
+          ]
+        ],
+        "prediction_distribution": {
+          "0": 7145,
+          "1": 13855
+        },
+        "execution_time": 1.1632702350616455,
+        "parameters": {
+          "filter_inputs": 2.0,
+          "filter_entries": 8.0,
+          "learning_rate": 0.1,
+          "epochs": 5.0
+        },
+        "status": "success"
+      },
+      "cluswisard": {
+        "accuracy": 0.8592380952380952,
+        "precision": 0.8605301758901759,
+        "recall": 0.8592380952380952,
+        "f1": 0.859123285038263,
+        "confusion_matrix": [
+          [
+            8734,
+            1790
+          ],
+          [
+            1166,
+            9310
+          ]
+        ],
+        "prediction_distribution": {
+          "0": 9900,
+          "1": 11100
+        },
+        "execution_time": 6.362108945846558,
+        "parameters": {
+          "address_size": 3.0,
+          "default_bleach": 0.05
+        },
+        "status": "success"
+      },
+      "torchwnn_wisard": {
+        "accuracy": 0.5218095238095238,
+        "precision": 0.7553011489142969,
+        "recall": 0.5218095238095238,
+        "f1": 0.37896393519841887,
+        "confusion_matrix": [
+          [
+            10524,
+            0
+          ],
+          [
+            10042,
+            434
+          ]
+        ],
+        "prediction_distribution": {
+          "0": 20566,
+          "1": 434
+        },
+        "execution_time": 2.1394073963165283,
+        "parameters": {
+          "address_size": 4.0
+        },
+        "status": "success"
+      },
+      "bethown": {
+        "accuracy": 0.5011428571428571,
+        "precision": 0.5005727892452342,
+        "recall": 0.5011428571428571,
+        "f1": 0.33468860140975737,
+        "confusion_matrix": [
+          [
+            10523,
+            1
+          ],
+          [
+            10475,
+            1
+          ]
+        ],
+        "prediction_distribution": {
+          "0": 20998,
+          "1": 2
+        },
+        "execution_time": 4.920671701431274,
+        "parameters": {
+          "address_size": 3.0,
+          "unit_entries": 128.0
+        },
+        "status": "success"
+      }
+    }
+  }
+}
