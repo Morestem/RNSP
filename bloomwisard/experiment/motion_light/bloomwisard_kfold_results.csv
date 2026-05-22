@@ -1,0 +1,3 @@
+tuple_bit,error,accuracy_mean,accuracy_std,balanced_accuracy_mean,precision_mean,precision_std,recall_mean,recall_std,f1_mean,f1_std,train_time_mean,test_time_mean,entry_size,kfold,runs
+1,0.01,0.3798670480563361,2.4049828936750783e-05,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.03395890485153359,0.011652354176112567,2,4,10
+2,0.01,0.3798670480563361,2.4049828936750783e-05,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.03376812959977542,0.011511201074608833,2,4,10

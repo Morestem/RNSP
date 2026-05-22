@@ -1,0 +1,2 @@
+bits_encoding,tuple_bit,error,accuracy,balanced_accuracy,precision,recall,f1_score,train_time,test_time
+64,2,0.01,1.0,1.0,1.0,1.0,1.0,1.4208747819993732,0.6480625670001245
